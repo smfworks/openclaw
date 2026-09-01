@@ -166,6 +166,8 @@ export type MemoryCorpusSupplement = {
     agentId?: string;
     agentSessionKey?: string;
     sandboxed?: boolean;
+    /** Caller-owned cancellation/deadline signal. Stop new work and reject with its reason. */
+    signal?: AbortSignal;
   }): Promise<MemoryCorpusSearchResult[]>;
   get(params: {
     lookup: string;
@@ -174,6 +176,8 @@ export type MemoryCorpusSupplement = {
     agentId?: string;
     agentSessionKey?: string;
     sandboxed?: boolean;
+    /** Caller-owned cancellation/deadline signal. Stop new work and reject with its reason. */
+    signal?: AbortSignal;
   }): Promise<MemoryCorpusGetResult | null>;
 };
 
