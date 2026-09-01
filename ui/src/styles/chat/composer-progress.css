@@ -878,6 +878,18 @@
   scrollbar-width: thin;
 }
 
+.session-progress-card--composer .session-progress-card__markdown.sidebar-markdown {
+  min-height: 0;
+  max-height: min(calc(8.4em + 35px), 36dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.session-progress-card--composer .session-progress-card__markdown.sidebar-markdown :is(ol, ul) {
+  padding-inline-end: 4px;
+}
+
 .session-progress-card--composer .session-progress-card__markdown progress {
   display: none;
 }

@@ -1525,6 +1525,59 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
     }
   });
 
+  it("keeps tall composer progress-card markdown reachable by scrolling", async () => {
+    const page = await openBrowserPage(1024, 720, { isolated: true });
+    try {
+      const progressCss = [
+        readStyleSheet("ui/src/styles/chat/progress-card.css"),
+        readStyleSheet("ui/src/styles/chat/composer-progress.css"),
+      ].join("\n");
+      const markdownRows = Array.from(
+        { length: 30 },
+        (_, index) => `| Row ${index + 1} | Value ${index + 1} |\n| --- | --- |\n| a ${index} | b ${index} |`,
+      ).join("\n");
+      await page.setContent(
+        `<!doctype html><html><head><style>${readUiCss()}\n${progressCss}</style></head><body>
+          <div class="agent-chat__progress-float" style="width: 800px">
+            <details class="session-progress-card session-progress-card--composer" open>
+              <summary class="session-progress-card__summary">
+                <span class="session-progress-card__summary-indicator"></span>
+                <span class="session-progress-card__summary-expanded">Task progress</span>
+                <span class="session-progress-card__summary-ch">${iconSvg()}</span>
+              </summary>
+              <div class="session-progress-card__body">
+                <div class="session-progress-card__markdown sidebar-markdown">
+                  <table><tbody>${markdownRows}</tbody></table>
+                  <p>Closing note that must remain reachable.</p>
+                </div>
+              </div>
+            </details>
+          </div>
+        </body></html>`,
+      );
+
+      const markdown = page.locator(".session-progress-card__markdown.sidebar-markdown");
+      const metrics = await markdown.evaluate((element) => ({
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
+      }));
+      expect(metrics.overflowY).toBe("auto");
+      expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+      await markdown.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+      const note = page.getByText("Closing note that must remain reachable.");
+      await expectBrowser(note).toBeVisible();
+      const markdownRect = await markdown.boundingBox();
+      const noteRect = await note.boundingBox();
+      expect(markdownRect).not.toBeNull();
+      expect(noteRect).not.toBeNull();
+      expect(noteRect!.y + noteRect!.height).toBeLessThanOrEqual(markdownRect!.y + markdownRect!.height + 1);
+    } finally {
+      await closeBrowserPage(page);
+    }
+  });
+
   it.each([
     { label: "narrow desktop", width: 430, height: 720, hasTouch: false },
     { label: "desktop", width: 1366, height: 900, hasTouch: false },
