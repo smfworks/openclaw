@@ -599,3 +599,204 @@ describe("OpenClaw MCP HTTP lifecycle adapters", () => {
     expect(getCount).toBe(1);
   });
 });
+
+describe("OpenClaw MCP HTTP lifecycle over a real server", () => {
+  // Real node:http server speaking just enough MCP Streamable HTTP for the SDK
+  // handshake plus session-aware DELETE handling. Tests connect through the
+  // transport's default global fetch — no injected fetch, no mocks.
+  type RealMcpHttpServer = {
+    baseUrl: URL;
+    deleteRequests: Array<string | undefined>;
+    expireSession: (sessionId: string) => void;
+    setDeleteStatus: (status: number | null) => void;
+    close: () => Promise<void>;
+  };
+
+  async function startRealMcpHttpServer(): Promise<RealMcpHttpServer> {
+    let nextSessionNumber = 0;
+    const sessions = new Map<string, { expired: boolean }>();
+    const deleteRequests: Array<string | undefined> = [];
+    let forcedDeleteStatus: number | null = null;
+    const sockets = new Set<Socket>();
+    const server = createServer((request, response) => {
+      response.on("error", () => {});
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk) => {
+        chunks.push(chunk as Buffer);
+      });
+      request.on("end", () => {
+        if (request.method === "DELETE") {
+          const headerSessionId = request.headers["mcp-session-id"];
+          const sessionId = Array.isArray(headerSessionId) ? headerSessionId[0] : headerSessionId;
+          deleteRequests.push(sessionId);
+          const session = sessionId === undefined ? undefined : sessions.get(sessionId);
+          const status =
+            forcedDeleteStatus ?? (session === undefined || session.expired ? 404 : 204);
+          if (status === 204 && session !== undefined && sessionId !== undefined) {
+            sessions.delete(sessionId);
+          }
+          response.writeHead(status).end();
+          return;
+        }
+        if (request.method === "GET") {
+          response.writeHead(405).end();
+          return;
+        }
+        if (request.method === "POST") {
+          let message: { id?: string | number; method?: string };
+          try {
+            message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+              id?: string | number;
+              method?: string;
+            };
+          } catch {
+            response.writeHead(400).end();
+            return;
+          }
+          if (message.method === "initialize") {
+            nextSessionNumber += 1;
+            const sessionId = `real-session-${nextSessionNumber}`;
+            sessions.set(sessionId, { expired: false });
+            response.writeHead(200, {
+              "content-type": "application/json",
+              "mcp-session-id": sessionId,
+            });
+            response.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: message.id ?? null,
+                result: {
+                  protocolVersion: "2025-06-18",
+                  capabilities: { tools: { listChanged: false } },
+                  serverInfo: { name: "real-mcp", version: "1" },
+                },
+              }),
+            );
+            return;
+          }
+          response.writeHead(202).end();
+          return;
+        }
+        response.writeHead(405).end();
+      });
+    });
+    server.on("connection", (socket) => {
+      sockets.add(socket);
+      socket.once("close", () => sockets.delete(socket));
+    });
+    server.on("clientError", (_err, socket) => socket.destroy());
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("expected loopback TCP address");
+    }
+    return {
+      baseUrl: new URL(`http://127.0.0.1:${address.port}/mcp`),
+      deleteRequests,
+      expireSession: (sessionId) => {
+        const session = sessions.get(sessionId);
+        if (session) {
+          session.expired = true;
+        }
+      },
+      setDeleteStatus: (status) => {
+        forcedDeleteStatus = status;
+      },
+      close: async () => {
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve());
+          server.closeAllConnections();
+        });
+      },
+    };
+  }
+
+  async function connectRealClient(server: RealMcpHttpServer) {
+    // Deliberately no options.fetch: termination must run against the real
+    // global fetch and a real TCP server.
+    const transport = new OpenClawStreamableHTTPClientTransport(server.baseUrl);
+    const client = new Client({ name: "test", version: "1" });
+    await client.connect(transport);
+    return { client, transport };
+  }
+
+  it("accepts a real 404 DELETE for an already-terminated session and reports closed cleanup", async () => {
+    const server = await startRealMcpHttpServer();
+    try {
+      const { client, transport } = await connectRealClient(server);
+      const sessionId = transport.sessionId;
+      expect(sessionId).toBeDefined();
+      // The remote already lost the session (server restart / expiry), so the
+      // very first DELETE hits a real 404.
+      server.expireSession(sessionId!);
+
+      await expect(settlesWithin(transport.terminateSession(), 1_000)).resolves.toBe(true);
+      expect(server.deleteRequests).toEqual([sessionId]);
+
+      // Marked terminated — repeats and disposal must not DELETE again.
+      await transport.terminateSession();
+      await expect(
+        disposeMcpClient({ client, transport, transportType: "streamable-http" }),
+      ).resolves.toBe("closed");
+      expect(server.deleteRequests).toEqual([sessionId]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts a real 405 DELETE without sending it again", async () => {
+    const server = await startRealMcpHttpServer();
+    try {
+      const { client, transport } = await connectRealClient(server);
+      server.setDeleteStatus(405);
+
+      await expect(settlesWithin(transport.terminateSession(), 1_000)).resolves.toBe(true);
+      await transport.terminateSession();
+      await expect(
+        disposeMcpClient({ client, transport, transportType: "streamable-http" }),
+      ).resolves.toBe("closed");
+      expect(server.deleteRequests).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps repeated cleanup idempotent after a real successful DELETE", async () => {
+    const server = await startRealMcpHttpServer();
+    try {
+      const { client, transport } = await connectRealClient(server);
+      await expect(settlesWithin(transport.terminateSession(), 1_000)).resolves.toBe(true);
+      await expect(
+        disposeMcpClient({ client, transport, transportType: "streamable-http" }),
+      ).resolves.toBe("closed");
+      await expect(
+        disposeMcpClient({ client, transport, transportType: "streamable-http" }),
+      ).resolves.toBe("closed");
+      expect(server.deleteRequests).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps failing and retrying when the real server rejects DELETE with 500", async () => {
+    const server = await startRealMcpHttpServer();
+    try {
+      const { client, transport } = await connectRealClient(server);
+      server.setDeleteStatus(500);
+
+      await expect(transport.terminateSession()).rejects.toThrow("Failed to terminate session");
+      await expect(transport.terminateSession()).rejects.toThrow("Failed to terminate session");
+      await expect(
+        disposeMcpClient({ client, transport, transportType: "streamable-http" }),
+      ).resolves.toBe("uncertain");
+      expect(server.deleteRequests).toHaveLength(3);
+    } finally {
+      await server.close();
+    }
+  });
+});
