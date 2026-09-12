@@ -442,14 +442,16 @@ describe("memory tools", () => {
         corpus,
       });
 
-      expect(search).toHaveBeenCalledWith({
-        query: "alpha",
-        maxResults: 3,
-        agentId: "marketing-agent",
-        agentSessionKey: "agent:marketing-agent:main",
-        sandboxed: true,
-        signal: expect.any(AbortSignal),
-      });
+      expect(search).toHaveBeenCalledWith(
+        {
+          query: "alpha",
+          maxResults: 3,
+          agentId: "marketing-agent",
+          agentSessionKey: "agent:marketing-agent:main",
+          sandboxed: true,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     },
   );
 
@@ -631,8 +633,8 @@ describe("memory tools", () => {
         ];
       });
       registerMemoryCorpusSupplement("memory-wiki", {
-        search: async (input) => {
-          supplementSignal = (input as typeof input & { signal?: AbortSignal }).signal;
+        search: async (_input, context) => {
+          supplementSignal = context?.signal;
           return await new Promise(() => {});
         },
         get: async () => null,
@@ -667,6 +669,104 @@ describe("memory tools", () => {
         ["memory", "MEMORY.md"],
       ]);
       expect(searchCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the established supplement first argument strict while passing cancellation separately (#135290 review)", async () => {
+    registerMemoryCorpusSupplement("memory-wiki", {
+      // Strict third-party validator over the established first argument: a
+      // host-injected `signal` key would reject otherwise valid searches.
+      search: async (input) => {
+        for (const key of Object.keys(input)) {
+          if (!["query", "maxResults", "agentId", "agentSessionKey", "sandboxed"].includes(key)) {
+            throw new Error(`unexpected supplement input key: ${key}`);
+          }
+        }
+        return [
+          {
+            corpus: "wiki" as const,
+            path: "entities/strict.md",
+            title: "Strict",
+            kind: "entity" as const,
+            score: 20,
+            snippet: "strict wiki hit",
+          },
+        ];
+      },
+      get: async () => null,
+    });
+
+    const tool = createMemorySearchToolOrThrow();
+    const result = await tool.execute("call_strict_first_arg", {
+      query: "alpha",
+      maxResults: 3,
+      corpus: "all",
+    });
+    const details = result.details as { results: Array<{ corpus: string; path: string }> };
+    expect(details.results.map((entry) => [entry.corpus, entry.path])).toContainEqual([
+      "wiki",
+      "entities/strict.md",
+    ]);
+    expect(result.details).not.toHaveProperty("warning");
+  });
+
+  it("cancels a stalled supplement at the deadline while keeping collected wiki results (#135290 review)", async () => {
+    vi.useFakeTimers();
+    try {
+      let stalledSignal: AbortSignal | undefined;
+      let fastContextSignal: AbortSignal | undefined;
+      registerMemoryCorpusSupplement("memory-wiki-fast", {
+        search: async (input, context) => {
+          expect("signal" in input).toBe(false);
+          fastContextSignal = context?.signal;
+          return [
+            {
+              corpus: "wiki" as const,
+              path: "entities/fast.md",
+              title: "Fast",
+              kind: "entity" as const,
+              score: 20,
+              snippet: "fast wiki hit",
+            },
+          ];
+        },
+        get: async () => null,
+      });
+      registerMemoryCorpusSupplement("memory-wiki-stalled", {
+        search: async (input, context) => {
+          expect("signal" in input).toBe(false);
+          stalledSignal = context?.signal;
+          return await new Promise(() => {});
+        },
+        get: async () => null,
+      });
+
+      const tool = createMemorySearchToolOrThrow();
+      const resultPromise = tool.execute("call_all_deadline_keeps_collected", {
+        query: "alpha",
+        corpus: "all",
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await resultPromise;
+      expect(result.details).toMatchObject({
+        results: expect.arrayContaining([
+          expect.objectContaining({ corpus: "memory", path: "MEMORY.md" }),
+          expect.objectContaining({ corpus: "wiki", path: "entities/fast.md" }),
+        ]),
+        corpora: [
+          { corpus: "memory", outcome: "ok" },
+          {
+            corpus: "wiki",
+            outcome: "unavailable",
+            error: "memory_search timed out after 15s",
+          },
+        ],
+        warning: expect.stringContaining("Wiki corpus unavailable"),
+      });
+      expect(fastContextSignal).toBeDefined();
+      expect(stalledSignal?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }

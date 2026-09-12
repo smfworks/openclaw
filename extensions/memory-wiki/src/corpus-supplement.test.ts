@@ -40,23 +40,27 @@ describe("memory-wiki corpus supplement", () => {
     const supplement = createWikiCorpusSupplement({ resolveConfig, getAppConfig });
     const controller = new AbortController();
 
-    await supplement.search({
-      query: "support handbook",
-      maxResults: 4,
-      agentId: "support",
-      agentSessionKey: "agent:support:main",
-      sandboxed: true,
-      signal: controller.signal,
-    });
-    await supplement.get({
-      lookup: "marketing-plan",
-      fromLine: 3,
-      lineCount: 8,
-      agentId: "marketing",
-      agentSessionKey: "agent:marketing:main",
-      sandboxed: false,
-      signal: controller.signal,
-    });
+    await supplement.search(
+      {
+        query: "support handbook",
+        maxResults: 4,
+        agentId: "support",
+        agentSessionKey: "agent:support:main",
+        sandboxed: true,
+      },
+      { signal: controller.signal },
+    );
+    await supplement.get(
+      {
+        lookup: "marketing-plan",
+        fromLine: 3,
+        lineCount: 8,
+        agentId: "marketing",
+        agentSessionKey: "agent:marketing:main",
+        sandboxed: false,
+      },
+      { signal: controller.signal },
+    );
 
     expect(resolveConfig).toHaveBeenNthCalledWith(1, "support", appConfig);
     expect(resolveConfig).toHaveBeenNthCalledWith(2, "marketing", appConfig);

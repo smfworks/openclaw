@@ -338,11 +338,13 @@ describe("searchMemoryWiki", () => {
     );
     const controller = new AbortController();
     const deadlineError = new Error("test wiki deadline");
-    const originalReadFile = fs.readFile.bind(fs);
+    // Vault page reads go through the fs-safe root boundary (open + bounded
+    // handle reads), so the open path is the observable start of each read.
+    const originalOpen = fs.open.bind(fs);
     let pageReads = 0;
-    const readFile = vi
-      .spyOn(fs, "readFile")
-      .mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+    const open = vi
+      .spyOn(fs, "open")
+      .mockImplementation(async (...args: Parameters<typeof fs.open>) => {
         const target = typeof args[0] === "string" ? path.basename(args[0]) : "";
         if (target.startsWith("deadline-pad-")) {
           pageReads += 1;
@@ -350,7 +352,7 @@ describe("searchMemoryWiki", () => {
             controller.abort(deadlineError);
           }
         }
-        return await originalReadFile(...args);
+        return await originalOpen(...args);
       });
 
     try {
@@ -363,7 +365,7 @@ describe("searchMemoryWiki", () => {
       ).rejects.toBe(deadlineError);
       expect(pageReads).toBeLessThan(pageCount);
     } finally {
-      readFile.mockRestore();
+      open.mockRestore();
     }
   });
 

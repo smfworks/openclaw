@@ -293,15 +293,17 @@ describe("memory_get corpus outcomes", () => {
 
       await tool.execute(`call_get_${corpus}`, { path: lookup, from: 2, lines: 4, corpus });
 
-      expect(get).toHaveBeenCalledWith({
-        lookup,
-        fromLine: 2,
-        lineCount: 4,
-        agentId: "marketing-agent",
-        agentSessionKey: "agent:marketing-agent:main",
-        sandboxed: true,
-        signal: expect.any(AbortSignal),
-      });
+      expect(get).toHaveBeenCalledWith(
+        {
+          lookup,
+          fromLine: 2,
+          lineCount: 4,
+          agentId: "marketing-agent",
+          agentSessionKey: "agent:marketing-agent:main",
+          sandboxed: true,
+        },
+        { signal: expect.any(AbortSignal) },
+      );
     },
   );
 

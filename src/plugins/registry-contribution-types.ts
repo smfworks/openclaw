@@ -159,26 +159,33 @@ type MemoryCorpusGetResult = {
   updatedAt?: string;
 };
 
+export type MemoryCorpusCallContext = {
+  /** Caller-owned cancellation/deadline signal. Stop new work and reject with its reason. */
+  signal?: AbortSignal;
+};
+
 export type MemoryCorpusSupplement = {
-  search(params: {
-    query: string;
-    maxResults?: number;
-    agentId?: string;
-    agentSessionKey?: string;
-    sandboxed?: boolean;
-    /** Caller-owned cancellation/deadline signal. Stop new work and reject with its reason. */
-    signal?: AbortSignal;
-  }): Promise<MemoryCorpusSearchResult[]>;
-  get(params: {
-    lookup: string;
-    fromLine?: number;
-    lineCount?: number;
-    agentId?: string;
-    agentSessionKey?: string;
-    sandboxed?: boolean;
-    /** Caller-owned cancellation/deadline signal. Stop new work and reject with its reason. */
-    signal?: AbortSignal;
-  }): Promise<MemoryCorpusGetResult | null>;
+  search(
+    params: {
+      query: string;
+      maxResults?: number;
+      agentId?: string;
+      agentSessionKey?: string;
+      sandboxed?: boolean;
+    },
+    context?: MemoryCorpusCallContext,
+  ): Promise<MemoryCorpusSearchResult[]>;
+  get(
+    params: {
+      lookup: string;
+      fromLine?: number;
+      lineCount?: number;
+      agentId?: string;
+      agentSessionKey?: string;
+      sandboxed?: boolean;
+    },
+    context?: MemoryCorpusCallContext,
+  ): Promise<MemoryCorpusGetResult | null>;
 };
 
 export type MemoryCorpusSupplementRegistration = {

@@ -280,9 +280,12 @@ export async function searchMemoryCorpusSupplements(params: {
   sandboxed?: boolean;
   signal: AbortSignal;
 }): Promise<MemoryCorpusAttempt<MemoryCorpusSearchResult[]>> {
+  // Keep the established first argument free of host-owned context: existing
+  // plugins may strictly validate that object. Forward cancellation separately.
+  const { signal, ...query } = params;
   return await settleMemorySupplements({
-    signal: params.signal,
-    run: async ({ supplement }) => await supplement.search(params),
+    signal,
+    run: async ({ supplement }) => await supplement.search(query, { signal }),
     merge: (results) =>
       results
         .flat()
@@ -300,10 +303,11 @@ export async function readMemoryCorpusSupplements(params: {
   sandboxed?: boolean;
   signal: AbortSignal;
 }): Promise<MemoryCorpusAttempt<MemorySupplementReadResult | null>> {
+  const { signal, ...query } = params;
   return await settleMemorySupplements({
-    signal: params.signal,
+    signal,
     run: async ({ supplement }) => {
-      const result = await supplement.get(params);
+      const result = await supplement.get(query, { signal });
       if (!result) {
         return null;
       }

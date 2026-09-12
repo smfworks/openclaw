@@ -8,14 +8,16 @@ export function createWikiCorpusSupplement(params: {
   getAppConfig: () => OpenClawConfig | undefined;
 }) {
   return {
-    search: async (input: {
-      query: string;
-      maxResults?: number;
-      agentId?: string;
-      agentSessionKey?: string;
-      sandboxed?: boolean;
-      signal?: AbortSignal;
-    }) => {
+    search: async (
+      input: {
+        query: string;
+        maxResults?: number;
+        agentId?: string;
+        agentSessionKey?: string;
+        sandboxed?: boolean;
+      },
+      context?: { signal?: AbortSignal },
+    ) => {
       const appConfig = params.getAppConfig();
       const config = params.resolveConfig(input.agentId, appConfig);
       return await searchMemoryWiki({
@@ -28,18 +30,20 @@ export function createWikiCorpusSupplement(params: {
         maxResults: input.maxResults,
         searchBackend: "local",
         searchCorpus: "wiki",
-        ...(input.signal ? { signal: input.signal } : {}),
+        ...(context?.signal ? { signal: context.signal } : {}),
       });
     },
-    get: async (input: {
-      lookup: string;
-      fromLine?: number;
-      lineCount?: number;
-      agentId?: string;
-      agentSessionKey?: string;
-      sandboxed?: boolean;
-      signal?: AbortSignal;
-    }) => {
+    get: async (
+      input: {
+        lookup: string;
+        fromLine?: number;
+        lineCount?: number;
+        agentId?: string;
+        agentSessionKey?: string;
+        sandboxed?: boolean;
+      },
+      context?: { signal?: AbortSignal },
+    ) => {
       const appConfig = params.getAppConfig();
       const config = params.resolveConfig(input.agentId, appConfig);
       return await getMemoryWikiPage({
@@ -53,7 +57,7 @@ export function createWikiCorpusSupplement(params: {
         lineCount: input.lineCount,
         searchBackend: "local",
         searchCorpus: "wiki",
-        ...(input.signal ? { signal: input.signal } : {}),
+        ...(context?.signal ? { signal: context.signal } : {}),
       });
     },
   };
