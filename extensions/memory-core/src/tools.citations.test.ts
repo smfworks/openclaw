@@ -18,6 +18,7 @@ import {
   setMemoryWorkspaceDir,
   type MemoryReadParams,
 } from "./memory-tool-manager.test-mocks.js";
+import { DEFAULT_MEMORY_SEARCH_TIMEOUT_MS } from "./memory/search-deadline.js";
 import {
   createMemoryCoreTestHarness,
   shortTermTestState as shortTermPromotionTesting,
@@ -748,7 +749,12 @@ describe("memory tools", () => {
         query: "alpha",
         corpus: "all",
       });
-      await vi.advanceTimersByTimeAsync(15_000);
+      // The search deadline tracks the configurable default budget, so advance
+      // until the stalled supplement is actually cancelled instead of assuming
+      // a fixed fake-time window.
+      for (let i = 0; i < 10 && !stalledSignal?.aborted; i += 1) {
+        await vi.advanceTimersByTimeAsync(DEFAULT_MEMORY_SEARCH_TIMEOUT_MS);
+      }
       const result = await resultPromise;
       expect(result.details).toMatchObject({
         results: expect.arrayContaining([
@@ -760,7 +766,7 @@ describe("memory tools", () => {
           {
             corpus: "wiki",
             outcome: "unavailable",
-            error: "memory_search timed out after 15s",
+            error: `memory_search timed out after ${DEFAULT_MEMORY_SEARCH_TIMEOUT_MS / 1000}s`,
           },
         ],
         warning: expect.stringContaining("Wiki corpus unavailable"),
